@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html>
+<body>
+<h1>Tableau des Primes Pirate</h1>
+
+<button onclick="window.location='create.html'">Ajouter une Prime</button>
+
+<ul id="bounty-list"></ul>
+
+<script>
+async function loadBounties() {
+    const res = await fetch("http://localhost:4566/restapis/ox5xlab16n/dev/_user_request_/bounties");
+    const data = await res.json();
+
+    const ul = document.getElementById("bounty-list");
+    ul.innerHTML = "";
+
+    data.forEach(b => {
+        const li = document.createElement("li");
+        li.innerHTML = `<b>${b.title}</b> – ${b.description}<br>
+        <a href="claim.html?id=${b.pk}">Revendiquer</a>`;
+        ul.appendChild(li);
+    });
+}
+
+loadBounties();
+</script>
+</body>
+</html>

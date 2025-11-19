@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html>
+<body>
+<h1>Ajouter une Prime</h1>
+
+Titre : <input id="title"><br><br>
+Description : <textarea id="desc"></textarea><br><br>
+
+<button onclick="create()">Ajouter</button>
+
+<script>
+async function create() {
+    const body = {
+        title: document.getElementById("title").value,
+        description: document.getElementById("desc").value
+    };
+
+    await fetch("http://localhost:4566/restapis/ox5xlab16n/dev/_user_request_/bounty", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify(body)
+    });
+
+    window.location = "index.html";
+}
+</script>
+</body>
+</html>

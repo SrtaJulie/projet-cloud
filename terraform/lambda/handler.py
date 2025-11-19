@@ -1,59 +1,49 @@
 import json
-import uuid
 import boto3
+import uuid
 import os
 
-LOCALSTACK = os.environ.get("LOCALSTACK_HOSTNAME", "localhost")
+table = boto3.resource("dynamodb").Table(os.environ["TABLE_NAME"])
 
-dynamodb = boto3.resource(
-    "dynamodb",
-    region_name="eu-west-1",
-    endpoint_url=f"http://{LOCALSTACK}:4566"
-)
-
-table = dynamodb.Table(os.environ["TABLE_NAME"])
-
-def handler(event, context):
-    path = event.get("path", "").rstrip("/")
-    method = event.get("httpMethod", "")
-
-    # /hello
-    if path == "/hello" and method == "GET":
-        return respond(200, {"message": "Ahoy, pirate !"})
-
-    # GET /bounties
-    if path == "/bounties" and method == "GET":
-        resp = table.scan()
-        return respond(200, resp.get("Items", []))
-
-    # POST /bounty
-    if path == "/bounty" and method == "POST":
-        body = json.loads(event["body"])
-        item = {
-            "pk": f"BOUNTY#{uuid.uuid4()}",
-            "title": body.get("title"),
-            "description": body.get("description")
-        }
-        table.put_item(Item=item)
-        return respond(200, item)
-
-    # POST /claim
-    if path == "/claim" and method == "POST":
-        body = json.loads(event["body"])
-        item = {
-            "pk": f"CLAIM#{uuid.uuid4()}",
-            "bountyId": body.get("bountyId"),
-            "claimer": body.get("claimer"),
-            "proof": body.get("proof")
-        }
-        table.put_item(Item=item)
-        return respond(200, item)
-
-    return respond(404, {"error": "Route inconnue"})
-
-def respond(status, body):
+def response(status, body):
     return {
         "statusCode": status,
-        "headers": {"Content-Type": "application/json"},
+        "headers": {
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Headers": "Content-Type",
+            "Access-Control-Allow-Methods": "GET,POST,OPTIONS"
+        },
         "body": json.dumps(body)
     }
+
+def handler(event, context):
+    path = event.get("path", "")
+    method = event.get("httpMethod", "")
+
+    # GET /hello
+    if path.endswith("/hello") and method == "GET":
+        return response(200, {"message": "Ahoy, pirate !"})
+
+    # GET /bounties
+    if path.endswith("/bounties") and method == "GET":
+        items = table.scan().get("Items", [])
+        return response(200, items)
+
+    # POST /bounty
+    if path.endswith("/bounty") and method == "POST":
+        body = json.loads(event["body"])
+        pk = f"BOUNTY#{str(uuid.uuid4())}"
+        item = {
+            "pk": pk,
+            "title": body["title"],
+            "description": body["description"]
+        }
+        table.put_item(Item=item)
+        return response(200, item)
+
+    # POST /claim
+    if path.endswith("/claim") and method == "POST":
+        body = json.loads(event["body"])
+        return response(200, {"status": "claim received", "data": body})
+
+    return response(404, {"error": "Not found"})

@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html>
+<body>
+<h1>Revendiquer une Prime</h1>
+
+Preuve : <textarea id="proof"></textarea><br><br>
+
+<button onclick="claim()">Envoyer</button>
+
+<script>
+const urlParams = new URLSearchParams(window.location.search);
+const bountyId = urlParams.get("id");
+
+async function claim() {
+    const body = {
+        bountyId: bountyId,
+        claimer: "Pirate inconnu",
+        proof: document.getElementById("proof").value
+    };
+
+    await fetch("http://localhost:4566/restapis/ox5xlab16n/dev/_user_request_/claim", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify(body)
+    });
+
+    window.location = "index.html";
+}
+</script>
+</body>
+</html>
