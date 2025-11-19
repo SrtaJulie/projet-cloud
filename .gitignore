@@ -1,0 +1,15 @@
+# Terraform internal files
+.terraform/
+terraform.tfstate
+terraform.tfstate.backup
+
+# LocalStack artifacts
+lambda.zip
+
+# Python artifacts
+__pycache__/
+*.pyc
+
+# OS garbage
+.DS_Store
+Thumbs.db

@@ -1,0 +1,16 @@
+version: "3.8"
+
+services:
+  localstack:
+    image: localstack/localstack:latest
+    container_name: localstack
+    ports:
+      - "4566:4566"      # Port unifié LocalStack
+      - "4571:4571"
+    environment:
+      - SERVICES=s3,lambda,apigateway,dynamodb,sqs,cloudwatch,iam
+      - DEBUG=1
+      - AWS_DEFAULT_REGION=eu-west-1
+    volumes:
+      - "./.localstack:/var/lib/localstack"
+      - "/var/run/docker.sock:/var/run/docker.sock"
