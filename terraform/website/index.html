@@ -1,26 +1,127 @@
 <!DOCTYPE html>
-<html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8" />
+    <title>Tableau des Primes Pirate</title>
+    <link rel="stylesheet" href="style.css" />
+</head>
 <body>
-<h1>Tableau des Primes Pirate</h1>
+<header>
+    <h1>Tableau des Primes Pirate</h1>
+    <div class="actions">
+        <a class="button-link" href="create.html">Ajouter une Prime</a>
+    </div>
+</header>
 
-<button onclick="window.location='create.html'">Ajouter une Prime</button>
-
-<ul id="bounty-list"></ul>
+<main>
+    <p id="error" class="error"></p>
+    <section id="bounties" class="bounty-grid"></section>
+</main>
 
 <script>
+const API_BASE = "http://localhost:4566/restapis/cidyjl26ih/dev/_user_request_";
+
+function formatReward(value) {
+    const n = Number(value || 0);
+    return n.toLocaleString("fr-FR", { minimumFractionDigits: 0 }) + " pièces d'or";
+}
+
+function statusLabel(status) {
+    if (status === "alive") return "Vivant";
+    if (status === "dead") return "Mort";
+    return "Inconnu";
+}
+
+function statusClass(status) {
+    if (status === "alive") return "alive";
+    if (status === "dead") return "dead";
+    return "unknown";
+}
+
 async function loadBounties() {
-    const res = await fetch("http://localhost:4566/restapis/ox5xlab16n/dev/_user_request_/bounties");
-    const data = await res.json();
+    const container = document.getElementById("bounties");
+    const errorEl = document.getElementById("error");
+    errorEl.textContent = "";
+    container.innerHTML = "Chargement...";
 
-    const ul = document.getElementById("bounty-list");
-    ul.innerHTML = "";
+    try {
+        const res = await fetch(`${API_BASE}/bounties`);
+        if (!res.ok) {
+            throw new Error("Erreur HTTP " + res.status);
+        }
+        const data = await res.json();
 
-    data.forEach(b => {
-        const li = document.createElement("li");
-        li.innerHTML = `<b>${b.title}</b> – ${b.description}<br>
-        <a href="claim.html?id=${b.pk}">Revendiquer</a>`;
-        ul.appendChild(li);
-    });
+        if (!Array.isArray(data) || data.length === 0) {
+            container.innerHTML = "<p>Aucune prime pour le moment.</p>";
+            return;
+        }
+
+        container.innerHTML = "";
+
+        data.forEach(b => {
+            const card = document.createElement("article");
+            card.className = "bounty-card";
+
+            const header = document.createElement("div");
+            header.className = "bounty-header";
+
+            const name = document.createElement("div");
+            name.className = "bounty-name";
+            name.textContent = b.name || "Inconnu";
+
+            const reward = document.createElement("div");
+            reward.className = "bounty-reward";
+            reward.textContent = formatReward(b.reward);
+
+            header.appendChild(name);
+            header.appendChild(reward);
+
+            const status = document.createElement("div");
+            status.className = "bounty-status " + statusClass(b.status);
+            status.textContent = statusLabel(b.status);
+
+            let img = null;
+            if (b.photoUrl) {
+                img = document.createElement("img");
+                img.src = b.photoUrl;
+                img.alt = "Photo de la cible";
+                img.className = "bounty-photo";
+            }
+
+            const desc = document.createElement("p");
+            desc.className = "bounty-description";
+            desc.textContent = b.description || "Aucune description.";
+
+            const footer = document.createElement("div");
+            footer.className = "bounty-footer";
+
+            if (b.claimed) {
+                const claimed = document.createElement("span");
+                claimed.className = "badge-claimed";
+                claimed.textContent = "🎯 Prime réclamée" + (b.claimer ? ` par ${b.claimer}` : "");
+                footer.appendChild(claimed);
+            } else {
+                const link = document.createElement("a");
+                link.className = "button-link";
+                link.textContent = "Revendiquer";
+                link.href = `claim.html?id=${encodeURIComponent(b.pk)}`;
+                footer.appendChild(link);
+            }
+
+            card.appendChild(header);
+            card.appendChild(status);
+            if (img) card.appendChild(img);
+            card.appendChild(desc);
+            card.appendChild(footer);
+
+            container.appendChild(card);
+        });
+
+    } catch (err) {
+        console.error(err);
+        container.innerHTML = "";
+        errorEl.textContent = "Erreur lors du chargement des primes.";
+    }
 }
 
 loadBounties();

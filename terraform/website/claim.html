@@ -1,31 +1,115 @@
 <!DOCTYPE html>
-<html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8" />
+    <title>Revendication de prime</title>
+    <link rel="stylesheet" href="style.css" />
+</head>
 <body>
-<h1>Revendiquer une Prime</h1>
+<header>
+    <h1>Revendication de prime</h1>
+    <div class="actions">
+        <a class="button-link" href="index.html">Retour au tableau</a>
+    </div>
+</header>
 
-Preuve : <textarea id="proof"></textarea><br><br>
+<main>
+    <p id="error" class="error"></p>
 
-<button onclick="claim()">Envoyer</button>
+    <section id="bounty-info"></section>
+
+    <form id="claim-form">
+        <div>
+            <label for="claimer">Ton nom / pseudo</label>
+            <input type="text" id="claimer" required />
+        </div>
+
+        <div>
+            <label for="proof">Preuve</label>
+            <textarea id="proof" placeholder="Explique comment tu as capturé ta cible..." required></textarea>
+        </div>
+
+        <div class="form-actions">
+            <button type="submit">Envoyer la revendication</button>
+            <a class="back-link" href="index.html">Annuler</a>
+        </div>
+    </form>
+</main>
 
 <script>
-const urlParams = new URLSearchParams(window.location.search);
-const bountyId = urlParams.get("id");
+const API_BASE = "http://localhost:4566/restapis/cidyjl26ih/dev/_user_request_";
 
-async function claim() {
+const params = new URLSearchParams(window.location.search);
+const bountyId = params.get("id");
+
+const errorEl = document.getElementById("error");
+const infoEl = document.getElementById("bounty-info");
+const form = document.getElementById("claim-form");
+
+if (!bountyId) {
+    errorEl.textContent = "ID de prime manquant.";
+    form.style.display = "none";
+} else {
+    loadBountySummary();
+}
+
+async function loadBountySummary() {
+    try {
+        const res = await fetch(`${API_BASE}/bounties`);
+        if (!res.ok) throw new Error("Erreur HTTP " + res.status);
+        const data = await res.json();
+
+        const bounty = data.find(b => b.pk === bountyId);
+        if (!bounty) {
+            infoEl.innerHTML = "<p>Prime introuvable.</p>";
+            form.style.display = "none";
+            return;
+        }
+
+        infoEl.innerHTML = `
+            <p><strong>Cible :</strong> ${bounty.name || "Inconnue"}</p>
+            <p><strong>Prime :</strong> ${bounty.reward || 0} pièces d'or</p>
+        `;
+    } catch (err) {
+        console.error(err);
+        infoEl.innerHTML = "<p>Impossible de charger les informations de la prime.</p>";
+    }
+}
+
+form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    errorEl.textContent = "";
+
     const body = {
         bountyId: bountyId,
-        claimer: "Pirate inconnu",
-        proof: document.getElementById("proof").value
+        claimer: document.getElementById("claimer").value.trim(),
+        proof: document.getElementById("proof").value.trim()
     };
 
-    await fetch("http://localhost:4566/restapis/ox5xlab16n/dev/_user_request_/claim", {
-        method: "POST",
-        headers: {"Content-Type": "application/json"},
-        body: JSON.stringify(body)
-    });
+    if (!body.claimer || !body.proof) {
+        errorEl.textContent = "Nom et preuve sont obligatoires.";
+        return;
+    }
 
-    window.location = "index.html";
-}
+    try {
+        const res = await fetch(`${API_BASE}/claim`, {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify(body)
+        });
+
+        if (!res.ok) {
+            throw new Error("Erreur HTTP " + res.status);
+        }
+
+        // Succès → retour au tableau
+        window.location.href = "index.html";
+
+    } catch (err) {
+        console.error(err);
+        errorEl.textContent = "Erreur lors de la revendication de la prime.";
+    }
+});
 </script>
 </body>
 </html>

@@ -1,28 +1,100 @@
 <!DOCTYPE html>
-<html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8" />
+    <title>Ajouter une Prime</title>
+    <link rel="stylesheet" href="style.css" />
+</head>
 <body>
-<h1>Ajouter une Prime</h1>
+<header>
+    <h1>Ajouter une Prime</h1>
+    <div class="actions">
+        <a class="button-link" href="index.html">Retour au tableau</a>
+    </div>
+</header>
 
-Titre : <input id="title"><br><br>
-Description : <textarea id="desc"></textarea><br><br>
+<main>
+    <p id="error" class="error"></p>
 
-<button onclick="create()">Ajouter</button>
+    <form id="create-form">
+        <div>
+            <label for="name">Nom / Pseudo de la cible</label>
+            <input type="text" id="name" required />
+        </div>
+
+        <div>
+            <label for="description">Description</label>
+            <textarea id="description" placeholder="Apparence, crimes, habitudes..."></textarea>
+        </div>
+
+        <div>
+            <label for="reward">Montant de la prime (en pièces d'or)</label>
+            <input type="number" id="reward" min="0" step="1" required />
+        </div>
+
+        <div>
+            <label for="status">Statut</label>
+            <select id="status">
+                <option value="alive">Vivant</option>
+                <option value="dead">Mort</option>
+                <option value="unknown" selected>Inconnu</option>
+            </select>
+        </div>
+
+        <div>
+            <label for="photoUrl">URL de la photo (pour la démo)</label>
+            <input type="text" id="photoUrl" placeholder="https://..." />
+        </div>
+
+        <div class="form-actions">
+            <button type="submit">Créer la prime</button>
+            <a class="back-link" href="index.html">Annuler</a>
+        </div>
+    </form>
+</main>
 
 <script>
-async function create() {
+const API_BASE = "http://localhost:4566/restapis/cidyjl26ih/dev/_user_request_";
+
+const form = document.getElementById("create-form");
+const errorEl = document.getElementById("error");
+
+form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    errorEl.textContent = "";
+
     const body = {
-        title: document.getElementById("title").value,
-        description: document.getElementById("desc").value
+        name: document.getElementById("name").value.trim(),
+        description: document.getElementById("description").value.trim(),
+        reward: document.getElementById("reward").value,
+        status: document.getElementById("status").value,
+        photoUrl: document.getElementById("photoUrl").value.trim()
     };
 
-    await fetch("http://localhost:4566/restapis/ox5xlab16n/dev/_user_request_/bounty", {
-        method: "POST",
-        headers: {"Content-Type": "application/json"},
-        body: JSON.stringify(body)
-    });
+    if (!body.name || !body.reward) {
+        errorEl.textContent = "Nom et montant sont obligatoires.";
+        return;
+    }
 
-    window.location = "index.html";
-}
+    try {
+        const res = await fetch(`${API_BASE}/bounty`, {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify(body)
+        });
+
+        if (!res.ok) {
+            throw new Error("Erreur HTTP " + res.status);
+        }
+
+        // On attend bien la fin, puis on retourne à l'index
+        window.location.href = "index.html";
+
+    } catch (err) {
+        console.error(err);
+        errorEl.textContent = "Erreur lors de la création de la prime.";
+    }
+});
 </script>
 </body>
 </html>
