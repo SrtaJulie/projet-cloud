@@ -35,10 +35,10 @@ provider "aws" {
 }
 
 # ---------------------------------------------------------------
-# DYNAMODB TABLE (PirateBounties) + CHIFFREMENT
+# DYNAMODB TABLE (VERSION STABLE)
 # ---------------------------------------------------------------
 resource "aws_dynamodb_table" "bounties" {
-  name         = "PirateBounties"  # <- nouveau nom pour éviter les conflits Bounties
+  name         = "Bounties"
   billing_mode = "PAY_PER_REQUEST"
   hash_key     = "pk"
 
@@ -46,15 +46,10 @@ resource "aws_dynamodb_table" "bounties" {
     name = "pk"
     type = "S"
   }
-
-# Désactivé car non supporté par LocalStack
-#  server_side_encryption {
-#   enabled = true
-#  }
 }
 
 # ---------------------------------------------------------------
-# LAMBDA ZIP
+# ARCHIVE LAMBDA
 # ---------------------------------------------------------------
 data "archive_file" "lambda_zip" {
   type        = "zip"
@@ -86,22 +81,13 @@ resource "aws_iam_role_policy" "lambda_policy" {
     Version = "2012-10-17",
     Statement = [
       {
-        Effect = "Allow",
-        Action = [
-          "logs:CreateLogGroup",
-          "logs:CreateLogStream",
-          "logs:PutLogEvents"
-        ],
+        Effect   = "Allow",
+        Action   = ["logs:*"],
         Resource = "*"
       },
       {
-        Effect = "Allow",
-        Action = [
-          "dynamodb:GetItem",
-          "dynamodb:PutItem",
-          "dynamodb:UpdateItem",
-          "dynamodb:Scan"
-        ],
+        Effect   = "Allow",
+        Action   = ["dynamodb:*"],
         Resource = aws_dynamodb_table.bounties.arn
       }
     ]
@@ -112,10 +98,6 @@ resource "aws_iam_role_policy" "lambda_policy" {
 # LAMBDA FUNCTION
 # ---------------------------------------------------------------
 resource "aws_lambda_function" "api_handler" {
-  depends_on = [
-    aws_dynamodb_table.bounties
-  ]
-
   function_name = "api-handler"
   runtime       = "python3.11"
   handler       = "handler.handler"
@@ -132,14 +114,14 @@ resource "aws_lambda_function" "api_handler" {
 }
 
 # ---------------------------------------------------------------
-# API GATEWAY ROOT
+# REST API ROOT
 # ---------------------------------------------------------------
 resource "aws_api_gateway_rest_api" "api" {
   name = "pirate-bounty-api"
 }
 
 # ---------------------------------------------------------------
-# CORS ROOT "/"
+# CORS ROOT OPTIONS
 # ---------------------------------------------------------------
 resource "aws_api_gateway_method" "root_options" {
   rest_api_id   = aws_api_gateway_rest_api.api.id
@@ -149,8 +131,6 @@ resource "aws_api_gateway_method" "root_options" {
 }
 
 resource "aws_api_gateway_integration" "root_options_integration" {
-  depends_on = [aws_lambda_function.api_handler]
-
   rest_api_id = aws_api_gateway_rest_api.api.id
   resource_id = aws_api_gateway_rest_api.api.root_resource_id
   http_method = aws_api_gateway_method.root_options.http_method
@@ -175,8 +155,6 @@ resource "aws_api_gateway_method_response" "root_options_response" {
 }
 
 resource "aws_api_gateway_integration_response" "root_options_integration_response" {
-  depends_on = [aws_api_gateway_integration.root_options_integration]
-
   rest_api_id = aws_api_gateway_rest_api.api.id
   resource_id = aws_api_gateway_rest_api.api.root_resource_id
   http_method = aws_api_gateway_method.root_options.http_method
@@ -187,10 +165,14 @@ resource "aws_api_gateway_integration_response" "root_options_integration_respon
     "method.response.header.Access-Control-Allow-Headers" = "'Content-Type'"
     "method.response.header.Access-Control-Allow-Methods" = "'GET,POST,OPTIONS'"
   }
+
+  response_templates = {
+    "application/json" = ""
+  }
 }
 
 # ---------------------------------------------------------------
-# ENDPOINT /hello (GET + OPTIONS)
+# /hello
 # ---------------------------------------------------------------
 resource "aws_api_gateway_resource" "hello" {
   rest_api_id = aws_api_gateway_rest_api.api.id
@@ -206,8 +188,6 @@ resource "aws_api_gateway_method" "hello_get" {
 }
 
 resource "aws_api_gateway_integration" "hello_integration" {
-  depends_on = [aws_lambda_function.api_handler]
-
   rest_api_id             = aws_api_gateway_rest_api.api.id
   resource_id             = aws_api_gateway_resource.hello.id
   http_method             = aws_api_gateway_method.hello_get.http_method
@@ -216,6 +196,7 @@ resource "aws_api_gateway_integration" "hello_integration" {
   uri                     = aws_lambda_function.api_handler.invoke_arn
 }
 
+# OPTIONS /hello
 resource "aws_api_gateway_method" "hello_options" {
   rest_api_id   = aws_api_gateway_rest_api.api.id
   resource_id   = aws_api_gateway_resource.hello.id
@@ -224,8 +205,6 @@ resource "aws_api_gateway_method" "hello_options" {
 }
 
 resource "aws_api_gateway_integration" "hello_options_integration" {
-  depends_on = [aws_lambda_function.api_handler]
-
   rest_api_id = aws_api_gateway_rest_api.api.id
   resource_id = aws_api_gateway_resource.hello.id
   http_method = aws_api_gateway_method.hello_options.http_method
@@ -250,8 +229,6 @@ resource "aws_api_gateway_method_response" "hello_options_response" {
 }
 
 resource "aws_api_gateway_integration_response" "hello_options_integration_response" {
-  depends_on = [aws_api_gateway_integration.hello_options_integration]
-
   rest_api_id = aws_api_gateway_rest_api.api.id
   resource_id = aws_api_gateway_resource.hello.id
   http_method = aws_api_gateway_method.hello_options.http_method
@@ -265,7 +242,7 @@ resource "aws_api_gateway_integration_response" "hello_options_integration_respo
 }
 
 # ---------------------------------------------------------------
-# ENDPOINT /bounties (GET + OPTIONS)
+# /bounties (GET)
 # ---------------------------------------------------------------
 resource "aws_api_gateway_resource" "bounties" {
   rest_api_id = aws_api_gateway_rest_api.api.id
@@ -281,8 +258,6 @@ resource "aws_api_gateway_method" "bounties_get" {
 }
 
 resource "aws_api_gateway_integration" "bounties_integration" {
-  depends_on = [aws_lambda_function.api_handler]
-
   rest_api_id             = aws_api_gateway_rest_api.api.id
   resource_id             = aws_api_gateway_resource.bounties.id
   http_method             = aws_api_gateway_method.bounties_get.http_method
@@ -291,6 +266,7 @@ resource "aws_api_gateway_integration" "bounties_integration" {
   uri                     = aws_lambda_function.api_handler.invoke_arn
 }
 
+# OPTIONS /bounties
 resource "aws_api_gateway_method" "bounties_options" {
   rest_api_id   = aws_api_gateway_rest_api.api.id
   resource_id   = aws_api_gateway_resource.bounties.id
@@ -299,8 +275,6 @@ resource "aws_api_gateway_method" "bounties_options" {
 }
 
 resource "aws_api_gateway_integration" "bounties_options_integration" {
-  depends_on = [aws_lambda_function.api_handler]
-
   rest_api_id = aws_api_gateway_rest_api.api.id
   resource_id = aws_api_gateway_resource.bounties.id
   http_method = aws_api_gateway_method.bounties_options.http_method
@@ -325,8 +299,6 @@ resource "aws_api_gateway_method_response" "bounties_options_response" {
 }
 
 resource "aws_api_gateway_integration_response" "bounties_options_integration_response" {
-  depends_on = [aws_api_gateway_integration.bounties_options_integration]
-
   rest_api_id = aws_api_gateway_rest_api.api.id
   resource_id = aws_api_gateway_resource.bounties.id
   http_method = aws_api_gateway_method.bounties_options.http_method
@@ -340,7 +312,7 @@ resource "aws_api_gateway_integration_response" "bounties_options_integration_re
 }
 
 # ---------------------------------------------------------------
-# ENDPOINT /bounty (POST + OPTIONS)
+# /bounty (POST)
 # ---------------------------------------------------------------
 resource "aws_api_gateway_resource" "bounty" {
   rest_api_id = aws_api_gateway_rest_api.api.id
@@ -356,8 +328,6 @@ resource "aws_api_gateway_method" "bounty_post" {
 }
 
 resource "aws_api_gateway_integration" "bounty_integration" {
-  depends_on = [aws_lambda_function.api_handler]
-
   rest_api_id             = aws_api_gateway_rest_api.api.id
   resource_id             = aws_api_gateway_resource.bounty.id
   http_method             = aws_api_gateway_method.bounty_post.http_method
@@ -366,6 +336,7 @@ resource "aws_api_gateway_integration" "bounty_integration" {
   uri                     = aws_lambda_function.api_handler.invoke_arn
 }
 
+# OPTIONS /bounty
 resource "aws_api_gateway_method" "bounty_options" {
   rest_api_id   = aws_api_gateway_rest_api.api.id
   resource_id   = aws_api_gateway_resource.bounty.id
@@ -374,8 +345,6 @@ resource "aws_api_gateway_method" "bounty_options" {
 }
 
 resource "aws_api_gateway_integration" "bounty_options_integration" {
-  depends_on = [aws_lambda_function.api_handler]
-
   rest_api_id = aws_api_gateway_rest_api.api.id
   resource_id = aws_api_gateway_resource.bounty.id
   http_method = aws_api_gateway_method.bounty_options.http_method
@@ -400,8 +369,6 @@ resource "aws_api_gateway_method_response" "bounty_options_response" {
 }
 
 resource "aws_api_gateway_integration_response" "bounty_options_integration_response" {
-  depends_on = [aws_api_gateway_integration.bounty_options_integration]
-
   rest_api_id = aws_api_gateway_rest_api.api.id
   resource_id = aws_api_gateway_resource.bounty.id
   http_method = aws_api_gateway_method.bounty_options.http_method
@@ -415,7 +382,7 @@ resource "aws_api_gateway_integration_response" "bounty_options_integration_resp
 }
 
 # ---------------------------------------------------------------
-# ENDPOINT /claim (POST + OPTIONS)
+# /claim (POST)
 # ---------------------------------------------------------------
 resource "aws_api_gateway_resource" "claim" {
   rest_api_id = aws_api_gateway_rest_api.api.id
@@ -431,8 +398,6 @@ resource "aws_api_gateway_method" "claim_post" {
 }
 
 resource "aws_api_gateway_integration" "claim_integration" {
-  depends_on = [aws_lambda_function.api_handler]
-
   rest_api_id             = aws_api_gateway_rest_api.api.id
   resource_id             = aws_api_gateway_resource.claim.id
   http_method             = aws_api_gateway_method.claim_post.http_method
@@ -441,6 +406,7 @@ resource "aws_api_gateway_integration" "claim_integration" {
   uri                     = aws_lambda_function.api_handler.invoke_arn
 }
 
+# OPTIONS /claim
 resource "aws_api_gateway_method" "claim_options" {
   rest_api_id   = aws_api_gateway_rest_api.api.id
   resource_id   = aws_api_gateway_resource.claim.id
@@ -449,8 +415,6 @@ resource "aws_api_gateway_method" "claim_options" {
 }
 
 resource "aws_api_gateway_integration" "claim_options_integration" {
-  depends_on = [aws_lambda_function.api_handler]
-
   rest_api_id = aws_api_gateway_rest_api.api.id
   resource_id = aws_api_gateway_resource.claim.id
   http_method = aws_api_gateway_method.claim_options.http_method
@@ -475,8 +439,6 @@ resource "aws_api_gateway_method_response" "claim_options_response" {
 }
 
 resource "aws_api_gateway_integration_response" "claim_options_integration_response" {
-  depends_on = [aws_api_gateway_integration.claim_options_integration]
-
   rest_api_id = aws_api_gateway_rest_api.api.id
   resource_id = aws_api_gateway_resource.claim.id
   http_method = aws_api_gateway_method.claim_options.http_method
@@ -513,7 +475,7 @@ resource "aws_api_gateway_deployment" "deploy" {
     aws_api_gateway_integration.bounties_options_integration,
     aws_api_gateway_integration.bounty_options_integration,
     aws_api_gateway_integration.claim_options_integration,
-    aws_api_gateway_integration.root_options_integration,
+    aws_api_gateway_integration.root_options_integration
   ]
 
   rest_api_id = aws_api_gateway_rest_api.api.id
@@ -526,7 +488,7 @@ resource "aws_api_gateway_stage" "dev" {
 }
 
 # ---------------------------------------------------------------
-# S3 FRONTEND STATIC SITE
+# S3 STATIC SITE
 # ---------------------------------------------------------------
 resource "aws_s3_bucket" "site_front" {
   bucket = "pirate-site-front-julie"
@@ -541,21 +503,6 @@ resource "aws_s3_bucket_website_configuration" "site_front" {
 
   error_document {
     key = "index.html"
-  }
-}
-
-resource "aws_s3_bucket_acl" "site_front_acl" {
-  bucket = aws_s3_bucket.site_front.id
-  acl    = "public-read"
-}
-
-resource "aws_s3_bucket_server_side_encryption_configuration" "site_front_sse" {
-  bucket = aws_s3_bucket.site_front.id
-
-  rule {
-    apply_server_side_encryption_by_default {
-      sse_algorithm = "AES256"
-    }
   }
 }
 
