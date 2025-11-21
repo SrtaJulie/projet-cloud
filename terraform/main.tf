@@ -126,7 +126,7 @@ resource "aws_iam_role_policy" "lambda_policy" {
 resource "aws_lambda_function" "hello" {
   function_name = "lambda-hello"
   runtime       = "python3.11"
-  handler       = "hello.handler"
+  handler       = "hello.handler.handler"
   role          = aws_iam_role.lambda_exec_role.arn
 
   filename         = data.archive_file.lambda_zip.output_path
@@ -136,7 +136,7 @@ resource "aws_lambda_function" "hello" {
 resource "aws_lambda_function" "get_bounties" {
   function_name = "lambda-get-bounties"
   runtime       = "python3.11"
-  handler       = "get_bounties.handler"
+  handler       = "get_bounties.handler.handler"
   role          = aws_iam_role.lambda_exec_role.arn
 
   filename         = data.archive_file.lambda_zip.output_path
@@ -152,7 +152,7 @@ resource "aws_lambda_function" "get_bounties" {
 resource "aws_lambda_function" "create_bounty" {
   function_name = "lambda-create-bounty"
   runtime       = "python3.11"
-  handler       = "create_bounty.handler"
+  handler       = "create_bounty.handler.handler"
   role          = aws_iam_role.lambda_exec_role.arn
 
   filename         = data.archive_file.lambda_zip.output_path
@@ -168,7 +168,7 @@ resource "aws_lambda_function" "create_bounty" {
 resource "aws_lambda_function" "claim_bounty" {
   function_name = "lambda-claim-bounty"
   runtime       = "python3.11"
-  handler       = "claim_bounty.handler"
+  handler       = "claim_bounty.handler.handler"
   role          = aws_iam_role.lambda_exec_role.arn
 
   filename         = data.archive_file.lambda_zip.output_path
