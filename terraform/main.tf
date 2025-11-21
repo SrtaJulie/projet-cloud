@@ -35,7 +35,7 @@ provider "aws" {
 }
 
 # ---------------------------------------------------------------
-# DYNAMODB TABLE
+# DYNAMODB TABLE (simple, stable sous LocalStack)
 # ---------------------------------------------------------------
 resource "aws_dynamodb_table" "bounties" {
   name         = "Bounties"
@@ -46,6 +46,17 @@ resource "aws_dynamodb_table" "bounties" {
     name = "pk"
     type = "S"
   }
+
+  # NOTE:
+  # En prod AWS, on activerait le chiffrement côté serveur (SSE) ici.
+  # Sur LocalStack, le bloc server_side_encryption provoque des erreurs
+  # CreateTable / ResourceInUseException, donc il est volontairement omis.
+  #
+  # Exemple (à utiliser en VRAI AWS, pas dans ce TP LocalStack) :
+  #
+  # server_side_encryption {
+  #   enabled = true
+  # }
 }
 
 # ---------------------------------------------------------------
@@ -58,7 +69,7 @@ data "archive_file" "lambda_zip" {
 }
 
 # ---------------------------------------------------------------
-# IAM ROLE
+# IAM ROLE + POLICIES (principe du moindre privilège)
 # ---------------------------------------------------------------
 resource "aws_iam_role" "lambda_exec_role" {
   name = "lambda_exec_role"
@@ -81,13 +92,24 @@ resource "aws_iam_role_policy" "lambda_policy" {
     Version = "2012-10-17",
     Statement = [
       {
-        Effect   = "Allow",
-        Action   = ["logs:*"],
+        # Logs CloudWatch : uniquement ce qui est nécessaire
+        Effect = "Allow",
+        Action = [
+          "logs:CreateLogGroup",
+          "logs:CreateLogStream",
+          "logs:PutLogEvents"
+        ],
         Resource = "*"
       },
       {
-        Effect   = "Allow",
-        Action   = ["dynamodb:*"],
+        # Accès limité à la table DynamoDB Bounties
+        Effect = "Allow",
+        Action = [
+          "dynamodb:GetItem",
+          "dynamodb:PutItem",
+          "dynamodb:UpdateItem",
+          "dynamodb:Scan"
+        ],
         Resource = aws_dynamodb_table.bounties.arn
       }
     ]
@@ -488,7 +510,7 @@ resource "aws_api_gateway_stage" "dev" {
 }
 
 # ---------------------------------------------------------------
-# S3 FRONT : Site statique
+# S3 FRONT : Site statique + ACL + SSE
 # ---------------------------------------------------------------
 resource "aws_s3_bucket" "site_front" {
   bucket = "pirate-site-front-julie"
@@ -506,6 +528,24 @@ resource "aws_s3_bucket_website_configuration" "site_front" {
   }
 }
 
+# ACL : site statique public (lecture seule)
+resource "aws_s3_bucket_acl" "site_front_acl" {
+  bucket = aws_s3_bucket.site_front.id
+  acl    = "public-read"
+}
+
+# SSE-S3 : chiffrement côté serveur (AES256)
+resource "aws_s3_bucket_server_side_encryption_configuration" "site_front_sse" {
+  bucket = aws_s3_bucket.site_front.id
+
+  rule {
+    apply_server_side_encryption_by_default {
+      sse_algorithm = "AES256"
+    }
+  }
+}
+
+# Public access block (laisse passer le public pour le site web)
 resource "aws_s3_bucket_public_access_block" "site_front_access" {
   bucket                  = aws_s3_bucket.site_front.id
   block_public_acls       = false
@@ -514,6 +554,7 @@ resource "aws_s3_bucket_public_access_block" "site_front_access" {
   restrict_public_buckets = false
 }
 
+# Bucket policy : autorise GET public sur les fichiers
 resource "aws_s3_bucket_policy" "site_front_policy" {
   bucket = aws_s3_bucket.site_front.id
   policy = jsonencode({
@@ -527,6 +568,7 @@ resource "aws_s3_bucket_policy" "site_front_policy" {
   })
 }
 
+# Upload des fichiers du front
 resource "aws_s3_object" "site_files" {
   for_each = fileset("${path.module}/website", "**")
 
