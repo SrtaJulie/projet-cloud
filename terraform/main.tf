@@ -35,7 +35,7 @@ provider "aws" {
 }
 
 # ---------------------------------------------------------------
-# DYNAMODB TABLE (VERSION STABLE)
+# DYNAMODB TABLE (simple, stable sous LocalStack)
 # ---------------------------------------------------------------
 resource "aws_dynamodb_table" "bounties" {
   name         = "Bounties"
@@ -46,10 +46,21 @@ resource "aws_dynamodb_table" "bounties" {
     name = "pk"
     type = "S"
   }
+
+  # NOTE:
+  # En prod AWS, on activerait le chiffrement côté serveur (SSE) ici.
+  # Sur LocalStack, le bloc server_side_encryption provoque des erreurs
+  # CreateTable / ResourceInUseException, donc il est volontairement omis.
+  #
+  # Exemple (à utiliser en VRAI AWS, pas dans ce TP LocalStack) :
+  #
+  # server_side_encryption {
+  #   enabled = true
+  # }
 }
 
 # ---------------------------------------------------------------
-# ARCHIVE LAMBDA
+# LAMBDA ZIP
 # ---------------------------------------------------------------
 data "archive_file" "lambda_zip" {
   type        = "zip"
@@ -58,7 +69,7 @@ data "archive_file" "lambda_zip" {
 }
 
 # ---------------------------------------------------------------
-# IAM ROLE
+# IAM ROLE + POLICIES (principe du moindre privilège)
 # ---------------------------------------------------------------
 resource "aws_iam_role" "lambda_exec_role" {
   name = "lambda_exec_role"
@@ -81,13 +92,24 @@ resource "aws_iam_role_policy" "lambda_policy" {
     Version = "2012-10-17",
     Statement = [
       {
-        Effect   = "Allow",
-        Action   = ["logs:*"],
+        # Logs CloudWatch : uniquement ce qui est nécessaire
+        Effect = "Allow",
+        Action = [
+          "logs:CreateLogGroup",
+          "logs:CreateLogStream",
+          "logs:PutLogEvents"
+        ],
         Resource = "*"
       },
       {
-        Effect   = "Allow",
-        Action   = ["dynamodb:*"],
+        # Accès limité à la table DynamoDB Bounties
+        Effect = "Allow",
+        Action = [
+          "dynamodb:GetItem",
+          "dynamodb:PutItem",
+          "dynamodb:UpdateItem",
+          "dynamodb:Scan"
+        ],
         Resource = aws_dynamodb_table.bounties.arn
       }
     ]
@@ -114,14 +136,14 @@ resource "aws_lambda_function" "api_handler" {
 }
 
 # ---------------------------------------------------------------
-# REST API ROOT
+# API GATEWAY ROOT
 # ---------------------------------------------------------------
 resource "aws_api_gateway_rest_api" "api" {
   name = "pirate-bounty-api"
 }
 
 # ---------------------------------------------------------------
-# CORS ROOT OPTIONS
+# CORS ROOT "/"
 # ---------------------------------------------------------------
 resource "aws_api_gateway_method" "root_options" {
   rest_api_id   = aws_api_gateway_rest_api.api.id
@@ -172,7 +194,7 @@ resource "aws_api_gateway_integration_response" "root_options_integration_respon
 }
 
 # ---------------------------------------------------------------
-# /hello
+# ENDPOINT /hello (GET + OPTIONS)
 # ---------------------------------------------------------------
 resource "aws_api_gateway_resource" "hello" {
   rest_api_id = aws_api_gateway_rest_api.api.id
@@ -196,7 +218,7 @@ resource "aws_api_gateway_integration" "hello_integration" {
   uri                     = aws_lambda_function.api_handler.invoke_arn
 }
 
-# OPTIONS /hello
+# CORS /hello
 resource "aws_api_gateway_method" "hello_options" {
   rest_api_id   = aws_api_gateway_rest_api.api.id
   resource_id   = aws_api_gateway_resource.hello.id
@@ -242,7 +264,7 @@ resource "aws_api_gateway_integration_response" "hello_options_integration_respo
 }
 
 # ---------------------------------------------------------------
-# /bounties (GET)
+# ENDPOINT /bounties (GET + OPTIONS)
 # ---------------------------------------------------------------
 resource "aws_api_gateway_resource" "bounties" {
   rest_api_id = aws_api_gateway_rest_api.api.id
@@ -266,7 +288,7 @@ resource "aws_api_gateway_integration" "bounties_integration" {
   uri                     = aws_lambda_function.api_handler.invoke_arn
 }
 
-# OPTIONS /bounties
+# CORS /bounties
 resource "aws_api_gateway_method" "bounties_options" {
   rest_api_id   = aws_api_gateway_rest_api.api.id
   resource_id   = aws_api_gateway_resource.bounties.id
@@ -312,7 +334,7 @@ resource "aws_api_gateway_integration_response" "bounties_options_integration_re
 }
 
 # ---------------------------------------------------------------
-# /bounty (POST)
+# ENDPOINT /bounty (POST + OPTIONS)
 # ---------------------------------------------------------------
 resource "aws_api_gateway_resource" "bounty" {
   rest_api_id = aws_api_gateway_rest_api.api.id
@@ -336,7 +358,7 @@ resource "aws_api_gateway_integration" "bounty_integration" {
   uri                     = aws_lambda_function.api_handler.invoke_arn
 }
 
-# OPTIONS /bounty
+# CORS /bounty
 resource "aws_api_gateway_method" "bounty_options" {
   rest_api_id   = aws_api_gateway_rest_api.api.id
   resource_id   = aws_api_gateway_resource.bounty.id
@@ -382,7 +404,7 @@ resource "aws_api_gateway_integration_response" "bounty_options_integration_resp
 }
 
 # ---------------------------------------------------------------
-# /claim (POST)
+# ENDPOINT /claim (POST + OPTIONS)
 # ---------------------------------------------------------------
 resource "aws_api_gateway_resource" "claim" {
   rest_api_id = aws_api_gateway_rest_api.api.id
@@ -406,7 +428,7 @@ resource "aws_api_gateway_integration" "claim_integration" {
   uri                     = aws_lambda_function.api_handler.invoke_arn
 }
 
-# OPTIONS /claim
+# CORS /claim
 resource "aws_api_gateway_method" "claim_options" {
   rest_api_id   = aws_api_gateway_rest_api.api.id
   resource_id   = aws_api_gateway_resource.claim.id
@@ -452,7 +474,7 @@ resource "aws_api_gateway_integration_response" "claim_options_integration_respo
 }
 
 # ---------------------------------------------------------------
-# PERMISSION LAMBDA
+# PERMISSION LAMBDA (API Gateway -> Lambda)
 # ---------------------------------------------------------------
 resource "aws_lambda_permission" "allow_from_apig" {
   statement_id  = "AllowInvokeFromAPIG"
@@ -488,7 +510,7 @@ resource "aws_api_gateway_stage" "dev" {
 }
 
 # ---------------------------------------------------------------
-# S3 STATIC SITE
+# S3 FRONT : Site statique + ACL + SSE
 # ---------------------------------------------------------------
 resource "aws_s3_bucket" "site_front" {
   bucket = "pirate-site-front-julie"
@@ -506,6 +528,24 @@ resource "aws_s3_bucket_website_configuration" "site_front" {
   }
 }
 
+# ACL : site statique public (lecture seule)
+resource "aws_s3_bucket_acl" "site_front_acl" {
+  bucket = aws_s3_bucket.site_front.id
+  acl    = "public-read"
+}
+
+# SSE-S3 : chiffrement côté serveur (AES256)
+resource "aws_s3_bucket_server_side_encryption_configuration" "site_front_sse" {
+  bucket = aws_s3_bucket.site_front.id
+
+  rule {
+    apply_server_side_encryption_by_default {
+      sse_algorithm = "AES256"
+    }
+  }
+}
+
+# Public access block (laisse passer le public pour le site web)
 resource "aws_s3_bucket_public_access_block" "site_front_access" {
   bucket                  = aws_s3_bucket.site_front.id
   block_public_acls       = false
@@ -514,6 +554,7 @@ resource "aws_s3_bucket_public_access_block" "site_front_access" {
   restrict_public_buckets = false
 }
 
+# Bucket policy : autorise GET public sur les fichiers
 resource "aws_s3_bucket_policy" "site_front_policy" {
   bucket = aws_s3_bucket.site_front.id
   policy = jsonencode({
@@ -527,6 +568,7 @@ resource "aws_s3_bucket_policy" "site_front_policy" {
   })
 }
 
+# Upload des fichiers du front
 resource "aws_s3_object" "site_files" {
   for_each = fileset("${path.module}/website", "**")
 
