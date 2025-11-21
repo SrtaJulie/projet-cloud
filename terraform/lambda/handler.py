@@ -6,15 +6,26 @@ import decimal
 from decimal import Decimal
 
 import boto3
+from botocore.exceptions import ClientError
 
-TABLE_NAME = os.environ["TABLE_NAME"]
+TABLE_NAME = os.environ.get("TABLE_NAME")
 
 dynamodb = boto3.resource("dynamodb")
 table = dynamodb.Table(TABLE_NAME)
 
 
+def table_exists():
+    """Vérifie si la table DynamoDB existe réellement."""
+    try:
+        table.meta.client.describe_table(TableName=TABLE_NAME)
+        return True
+    except ClientError as e:
+        if e.response["Error"]["Code"] == "ResourceNotFoundException":
+            return False
+        raise e
+
+
 def convert_decimals(item):
-    """Convertit récursivement tous les Decimal en float."""
     if isinstance(item, list):
         return [convert_decimals(i) for i in item]
     if isinstance(item, dict):
@@ -25,7 +36,6 @@ def convert_decimals(item):
 
 
 def make_response(status_code, body):
-    """Réponse standard avec CORS."""
     body = convert_decimals(body)
     return {
         "statusCode": status_code,
@@ -42,8 +52,16 @@ def make_response(status_code, body):
 def handler(event, context):
     print("EVENT:", json.dumps(event))
 
+    # Empêche la Lambda de toucher DynamoDB si la table n'existe pas encore
+    if not table_exists():
+        return make_response(503, {
+            "error": "Table DynamoDB non encore disponible",
+            "hint": "Réessayez dans quelques secondes"
+        })
+
     http_method = event.get("httpMethod", "GET")
     path = event.get("path", "/")
+
 
     def is_path(p):
         return path == p or path.endswith(p)
@@ -54,7 +72,6 @@ def handler(event, context):
     # GET /bounties
     if is_path("/bounties") and http_method == "GET":
         items = table.scan().get("Items", [])
-        # tri
         items = sorted(items, key=lambda x: float(x.get("reward", 0)), reverse=True)
         return make_response(200, items)
 
@@ -84,7 +101,6 @@ def handler(event, context):
         }
 
         table.put_item(Item=item)
-
         return make_response(200, item)
 
     # POST /claim
