@@ -576,6 +576,16 @@ resource "aws_s3_object" "site_files" {
   key    = each.value
   source = "${path.module}/website/${each.value}"
   etag   = filemd5("${path.module}/website/${each.value}")
+  content_type = lookup({
+    "html" = "text/html",
+    "css"  = "text/css",
+    "js"   = "application/javascript",
+    "png"  = "image/png",
+    "jpg"  = "image/jpeg",
+    "jpeg" = "image/jpeg",
+    "gif"  = "image/gif",
+    "ico"  = "image/x-icon"
+  }, split(".", each.value)[length(split(".", each.value)) - 1], "application/octet-stream")
 }
 
 # ---------------------------------------------------------------
