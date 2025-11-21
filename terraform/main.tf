@@ -1,6 +1,3 @@
-#############################################################
-# TERRAFORM + PROVIDERS
-#############################################################
 terraform {
   required_version = ">= 1.5.0"
 
@@ -16,13 +13,18 @@ terraform {
   }
 }
 
+# ---------------------------------------------------------------
+# PROVIDER LOCALSTACK
+# ---------------------------------------------------------------
 provider "aws" {
   region                      = var.aws_region
   access_key                  = var.aws_access_key
   secret_key                  = var.aws_secret_key
   skip_credentials_validation = true
+  skip_requesting_account_id  = true
   skip_metadata_api_check     = true
-  s3_use_path_style           = true
+
+  s3_use_path_style = true
 
   endpoints {
     s3         = var.localstack_endpoint
@@ -60,7 +62,7 @@ resource "aws_dynamodb_table" "bounties" {
 }
 
 # ---------------------------------------------------------------
-# LAMBDA ZIP
+# LAMBDA ZIP UNIQUE (toutes les lambdas dans /lambda)
 # ---------------------------------------------------------------
 data "archive_file" "lambda_zip" {
   type        = "zip"
@@ -86,12 +88,11 @@ resource "aws_iam_role" "lambda_exec_role" {
 
 resource "aws_iam_role_policy" "lambda_policy" {
   name = "lambda_policy"
-  role = aws_iam_role.lambda_role.id
+  role = aws_iam_role.lambda_exec_role.id
 
   policy = jsonencode({
     Version = "2012-10-17",
     Statement = [
-      # Logs
       {
         Effect = "Allow",
         Action = [
@@ -101,14 +102,13 @@ resource "aws_iam_role_policy" "lambda_policy" {
         ],
         Resource = "*"
       },
-      # Accès Dynamo strict
       {
         Effect = "Allow",
         Action = [
-          "dynamodb:Scan",
+          "dynamodb:GetItem",
           "dynamodb:PutItem",
           "dynamodb:UpdateItem",
-          "dynamodb:GetItem"
+          "dynamodb:Scan"
         ],
         Resource = aws_dynamodb_table.bounties.arn
       }
@@ -116,80 +116,63 @@ resource "aws_iam_role_policy" "lambda_policy" {
   })
 }
 
-#############################################################
-# PACKAGING DES 4 LAMBDAS
-#############################################################
-
-# 1 — HELLO
-data "archive_file" "hello_zip" {
-  type        = "zip"
-  source_file = "${path.module}/lambdas/hello.py"
-  output_path = "${path.module}/build/hello.zip"
-}
+# ---------------------------------------------------------------
+# LAMBDAS (4 fonctions séparées, même ZIP)
+# ---------------------------------------------------------------
+# handler = "hello.handler"  -> lambda/hello/handler.py
+# handler = "get_bounties.handler" -> lambda/get_bounties/handler.py
+# etc.
 
 resource "aws_lambda_function" "hello" {
-  function_name = "hello"
-  role          = aws_iam_role.lambda_role.arn
+  function_name = "lambda-hello"
   runtime       = "python3.11"
   handler       = "hello.handler"
-  filename      = data.archive_file.hello_zip.output_path
+  role          = aws_iam_role.lambda_exec_role.arn
+
+  filename         = data.archive_file.lambda_zip.output_path
+  source_code_hash = data.archive_file.lambda_zip.output_base64sha256
 }
 
-# 2 — LIST BOUNTIES
-data "archive_file" "list_bounties_zip" {
-  type        = "zip"
-  source_file = "${path.module}/lambdas/list_bounties.py"
-  output_path = "${path.module}/build/list_bounties.zip"
-}
-
-resource "aws_lambda_function" "list_bounties" {
-  function_name = "list-bounties"
-  role          = aws_iam_role.lambda_role.arn
+resource "aws_lambda_function" "get_bounties" {
+  function_name = "lambda-get-bounties"
   runtime       = "python3.11"
-  handler       = "list_bounties.handler"
-  filename      = data.archive_file.list_bounties_zip.output_path
+  handler       = "get_bounties.handler"
+  role          = aws_iam_role.lambda_exec_role.arn
+
+  filename         = data.archive_file.lambda_zip.output_path
+  source_code_hash = data.archive_file.lambda_zip.output_base64sha256
 
   environment {
     variables = {
       TABLE_NAME = aws_dynamodb_table.bounties.name
     }
   }
-}
-
-# 3 — CREATE BOUNTY
-data "archive_file" "create_bounty_zip" {
-  type        = "zip"
-  source_file = "${path.module}/lambdas/create_bounty.py"
-  output_path = "${path.module}/build/create_bounty.zip"
 }
 
 resource "aws_lambda_function" "create_bounty" {
-  function_name = "create-bounty"
-  role          = aws_iam_role.lambda_role.arn
+  function_name = "lambda-create-bounty"
   runtime       = "python3.11"
   handler       = "create_bounty.handler"
-  filename      = data.archive_file.create_bounty_zip.output_path
+  role          = aws_iam_role.lambda_exec_role.arn
+
+  filename         = data.archive_file.lambda_zip.output_path
+  source_code_hash = data.archive_file.lambda_zip.output_base64sha256
 
   environment {
     variables = {
       TABLE_NAME = aws_dynamodb_table.bounties.name
     }
   }
-}
-
-# 4 — CLAIM
-data "archive_file" "claim_bounty_zip" {
-  type        = "zip"
-  source_file = "${path.module}/lambdas/claim_bounty.py"
-  output_path = "${path.module}/build/claim_bounty.zip"
 }
 
 resource "aws_lambda_function" "claim_bounty" {
-  function_name = "claim-bounty"
-  role          = aws_iam_role.lambda_role.arn
+  function_name = "lambda-claim-bounty"
   runtime       = "python3.11"
   handler       = "claim_bounty.handler"
-  filename      = data.archive_file.claim_bounty_zip.output_path
+  role          = aws_iam_role.lambda_exec_role.arn
+
+  filename         = data.archive_file.lambda_zip.output_path
+  source_code_hash = data.archive_file.lambda_zip.output_base64sha256
 
   environment {
     variables = {
@@ -198,35 +181,65 @@ resource "aws_lambda_function" "claim_bounty" {
   }
 }
 
-#############################################################
-# API GATEWAY
-#############################################################
+# ---------------------------------------------------------------
+# API GATEWAY ROOT
+# ---------------------------------------------------------------
 resource "aws_api_gateway_rest_api" "api" {
   name = "pirate-bounty-api"
 }
 
-#############################
-# CORS HELPER (réutilisé)
-#############################
-locals {
-  cors_headers = {
+# ---------------------------------------------------------------
+# CORS ROOT "/"
+# ---------------------------------------------------------------
+resource "aws_api_gateway_method" "root_options" {
+  rest_api_id   = aws_api_gateway_rest_api.api.id
+  resource_id   = aws_api_gateway_rest_api.api.root_resource_id
+  http_method   = "OPTIONS"
+  authorization = "NONE"
+}
+
+resource "aws_api_gateway_integration" "root_options_integration" {
+  rest_api_id = aws_api_gateway_rest_api.api.id
+  resource_id = aws_api_gateway_rest_api.api.root_resource_id
+  http_method = aws_api_gateway_method.root_options.http_method
+  type        = "MOCK"
+
+  request_templates = {
+    "application/json" = "{ \"statusCode\": 200 }"
+  }
+}
+
+resource "aws_api_gateway_method_response" "root_options_response" {
+  rest_api_id = aws_api_gateway_rest_api.api.id
+  resource_id = aws_api_gateway_rest_api.api.root_resource_id
+  http_method = aws_api_gateway_method.root_options.http_method
+  status_code = "200"
+
+  response_parameters = {
     "method.response.header.Access-Control-Allow-Origin"  = true
     "method.response.header.Access-Control-Allow-Headers" = true
     "method.response.header.Access-Control-Allow-Methods" = true
   }
+}
 
-  cors_params = {
+resource "aws_api_gateway_integration_response" "root_options_integration_response" {
+  depends_on = [aws_api_gateway_integration.root_options_integration]
+
+  rest_api_id = aws_api_gateway_rest_api.api.id
+  resource_id = aws_api_gateway_rest_api.api.root_resource_id
+  http_method = aws_api_gateway_method.root_options.http_method
+  status_code = aws_api_gateway_method_response.root_options_response.status_code
+
+  response_parameters = {
     "method.response.header.Access-Control-Allow-Origin"  = "'*'"
     "method.response.header.Access-Control-Allow-Headers" = "'Content-Type'"
     "method.response.header.Access-Control-Allow-Methods" = "'GET,POST,OPTIONS'"
   }
 }
 
-#############################################################
-# ROUTES
-#############################################################
-
-### /hello (GET)
+# ---------------------------------------------------------------
+# ENDPOINT /hello (GET + OPTIONS) -> lambda hello
+# ---------------------------------------------------------------
 resource "aws_api_gateway_resource" "hello" {
   rest_api_id = aws_api_gateway_rest_api.api.id
   parent_id   = aws_api_gateway_rest_api.api.root_resource_id
@@ -240,7 +253,7 @@ resource "aws_api_gateway_method" "hello_get" {
   authorization = "NONE"
 }
 
-resource "aws_api_gateway_integration" "hello_int" {
+resource "aws_api_gateway_integration" "hello_integration" {
   rest_api_id             = aws_api_gateway_rest_api.api.id
   resource_id             = aws_api_gateway_resource.hello.id
   http_method             = aws_api_gateway_method.hello_get.http_method
@@ -257,35 +270,48 @@ resource "aws_api_gateway_method" "hello_options" {
   authorization = "NONE"
 }
 
-resource "aws_api_gateway_integration" "hello_cors" {
+resource "aws_api_gateway_integration" "hello_options_integration" {
   rest_api_id = aws_api_gateway_rest_api.api.id
   resource_id = aws_api_gateway_resource.hello.id
-  http_method = "OPTIONS"
+  http_method = aws_api_gateway_method.hello_options.http_method
   type        = "MOCK"
+
   request_templates = {
     "application/json" = "{ \"statusCode\": 200 }"
   }
 }
 
-resource "aws_api_gateway_method_response" "hello_cors_resp" {
+resource "aws_api_gateway_method_response" "hello_options_response" {
   rest_api_id = aws_api_gateway_rest_api.api.id
   resource_id = aws_api_gateway_resource.hello.id
-  http_method = "OPTIONS"
+  http_method = aws_api_gateway_method.hello_options.http_method
   status_code = "200"
-  response_parameters = local.cors_headers
+
+  response_parameters = {
+    "method.response.header.Access-Control-Allow-Origin"  = true
+    "method.response.header.Access-Control-Allow-Headers" = true
+    "method.response.header.Access-Control-Allow-Methods" = true
+  }
 }
 
-resource "aws_api_gateway_integration_response" "hello_cors_int_resp" {
-  rest_api_id  = aws_api_gateway_rest_api.api.id
-  resource_id  = aws_api_gateway_resource.hello.id
-  http_method  = "OPTIONS"
-  status_code  = "200"
-  response_parameters = local.cors_params
+resource "aws_api_gateway_integration_response" "hello_options_integration_response" {
+  depends_on = [aws_api_gateway_integration.hello_options_integration]
+
+  rest_api_id = aws_api_gateway_rest_api.api.id
+  resource_id = aws_api_gateway_resource.hello.id
+  http_method = aws_api_gateway_method.hello_options.http_method
+  status_code = aws_api_gateway_method_response.hello_options_response.status_code
+
+  response_parameters = {
+    "method.response.header.Access-Control-Allow-Origin"  = "'*'"
+    "method.response.header.Access-Control-Allow-Headers" = "'Content-Type'"
+    "method.response.header.Access-Control-Allow-Methods" = "'GET,POST,OPTIONS'"
+  }
 }
 
-#############################################################
-# /bounties (GET)
-#############################################################
+# ---------------------------------------------------------------
+# ENDPOINT /bounties (GET + OPTIONS) -> lambda get_bounties
+# ---------------------------------------------------------------
 resource "aws_api_gateway_resource" "bounties" {
   rest_api_id = aws_api_gateway_rest_api.api.id
   parent_id   = aws_api_gateway_rest_api.api.root_resource_id
@@ -299,50 +325,65 @@ resource "aws_api_gateway_method" "bounties_get" {
   authorization = "NONE"
 }
 
-resource "aws_api_gateway_integration" "bounties_int" {
+resource "aws_api_gateway_integration" "bounties_integration" {
   rest_api_id             = aws_api_gateway_rest_api.api.id
   resource_id             = aws_api_gateway_resource.bounties.id
-  http_method             = "GET"
+  http_method             = aws_api_gateway_method.bounties_get.http_method
   integration_http_method = "POST"
   type                    = "AWS_PROXY"
-  uri                     = aws_lambda_function.list_bounties.invoke_arn
+  uri                     = aws_lambda_function.get_bounties.invoke_arn
 }
 
 # CORS /bounties
-resource "aws_api_gateway_method" "bounties_opt" {
+resource "aws_api_gateway_method" "bounties_options" {
   rest_api_id   = aws_api_gateway_rest_api.api.id
   resource_id   = aws_api_gateway_resource.bounties.id
   http_method   = "OPTIONS"
   authorization = "NONE"
 }
 
-resource "aws_api_gateway_integration" "bounties_cors" {
-  rest_api_id        = aws_api_gateway_rest_api.api.id
-  resource_id        = aws_api_gateway_resource.bounties.id
-  http_method        = "OPTIONS"
-  type               = "MOCK"
-  request_templates  = { "application/json" = "{ \"statusCode\": 200 }" }
+resource "aws_api_gateway_integration" "bounties_options_integration" {
+  rest_api_id = aws_api_gateway_rest_api.api.id
+  resource_id = aws_api_gateway_resource.bounties.id
+  http_method = aws_api_gateway_method.bounties_options.http_method
+  type        = "MOCK"
+
+  request_templates = {
+    "application/json" = "{ \"statusCode\": 200 }"
+  }
 }
 
-resource "aws_api_gateway_method_response" "bounties_cors_resp" {
-  rest_api_id        = aws_api_gateway_rest_api.api.id
-  resource_id        = aws_api_gateway_resource.bounties.id
-  http_method        = "OPTIONS"
-  status_code        = "200"
-  response_parameters = local.cors_headers
+resource "aws_api_gateway_method_response" "bounties_options_response" {
+  rest_api_id = aws_api_gateway_rest_api.api.id
+  resource_id = aws_api_gateway_resource.bounties.id
+  http_method = aws_api_gateway_method.bounties_options.http_method
+  status_code = "200"
+
+  response_parameters = {
+    "method.response.header.Access-Control-Allow-Origin"  = true
+    "method.response.header.Access-Control-Allow-Headers" = true
+    "method.response.header.Access-Control-Allow-Methods" = true
+  }
 }
 
-resource "aws_api_gateway_integration_response" "bounties_cors_int_resp" {
-  rest_api_id        = aws_api_gateway_rest_api.api.id
-  resource_id        = aws_api_gateway_resource.bounties.id
-  http_method        = "OPTIONS"
-  status_code        = "200"
-  response_parameters = local.cors_params
+resource "aws_api_gateway_integration_response" "bounties_options_integration_response" {
+  depends_on = [aws_api_gateway_integration.bounties_options_integration]
+
+  rest_api_id = aws_api_gateway_rest_api.api.id
+  resource_id = aws_api_gateway_resource.bounties.id
+  http_method = aws_api_gateway_method.bounties_options.http_method
+  status_code = aws_api_gateway_method_response.bounties_options_response.status_code
+
+  response_parameters = {
+    "method.response.header.Access-Control-Allow-Origin"  = "'*'"
+    "method.response.header.Access-Control-Allow-Headers" = "'Content-Type'"
+    "method.response.header.Access-Control-Allow-Methods" = "'GET,POST,OPTIONS'"
+  }
 }
 
-#############################################################
-# /bounty (POST)
-#############################################################
+# ---------------------------------------------------------------
+# ENDPOINT /bounty (POST + OPTIONS) -> lambda create_bounty
+# ---------------------------------------------------------------
 resource "aws_api_gateway_resource" "bounty" {
   rest_api_id = aws_api_gateway_rest_api.api.id
   parent_id   = aws_api_gateway_rest_api.api.root_resource_id
@@ -356,50 +397,65 @@ resource "aws_api_gateway_method" "bounty_post" {
   authorization = "NONE"
 }
 
-resource "aws_api_gateway_integration" "bounty_int" {
+resource "aws_api_gateway_integration" "bounty_integration" {
   rest_api_id             = aws_api_gateway_rest_api.api.id
   resource_id             = aws_api_gateway_resource.bounty.id
-  http_method             = "POST"
+  http_method             = aws_api_gateway_method.bounty_post.http_method
   integration_http_method = "POST"
   type                    = "AWS_PROXY"
   uri                     = aws_lambda_function.create_bounty.invoke_arn
 }
 
 # CORS /bounty
-resource "aws_api_gateway_method" "bounty_opt" {
+resource "aws_api_gateway_method" "bounty_options" {
   rest_api_id   = aws_api_gateway_rest_api.api.id
   resource_id   = aws_api_gateway_resource.bounty.id
   http_method   = "OPTIONS"
   authorization = "NONE"
 }
 
-resource "aws_api_gateway_integration" "bounty_cors" {
-  rest_api_id       = aws_api_gateway_rest_api.api.id
-  resource_id       = aws_api_gateway_resource.bounty.id
-  http_method       = "OPTIONS"
-  type              = "MOCK"
-  request_templates = { "application/json" = "{ \"statusCode\": 200 }" }
+resource "aws_api_gateway_integration" "bounty_options_integration" {
+  rest_api_id = aws_api_gateway_rest_api.api.id
+  resource_id = aws_api_gateway_resource.bounty.id
+  http_method = aws_api_gateway_method.bounty_options.http_method
+  type        = "MOCK"
+
+  request_templates = {
+    "application/json" = "{ \"statusCode\": 200 }"
+  }
 }
 
-resource "aws_api_gateway_method_response" "bounty_cors_resp" {
-  rest_api_id        = aws_api_gateway_rest_api.api.id
-  resource_id        = aws_api_gateway_resource.bounty.id
-  http_method        = "OPTIONS"
-  status_code        = "200"
-  response_parameters = local.cors_headers
+resource "aws_api_gateway_method_response" "bounty_options_response" {
+  rest_api_id = aws_api_gateway_rest_api.api.id
+  resource_id = aws_api_gateway_resource.bounty.id
+  http_method = aws_api_gateway_method.bounty_options.http_method
+  status_code = "200"
+
+  response_parameters = {
+    "method.response.header.Access-Control-Allow-Origin"  = true
+    "method.response.header.Access-Control-Allow-Headers" = true
+    "method.response.header.Access-Control-Allow-Methods" = true
+  }
 }
 
-resource "aws_api_gateway_integration_response" "bounty_cors_int_resp" {
-  rest_api_id        = aws_api_gateway_rest_api.api.id
-  resource_id        = aws_api_gateway_resource.bounty.id
-  http_method        = "OPTIONS"
-  status_code        = "200"
-  response_parameters = local.cors_params
+resource "aws_api_gateway_integration_response" "bounty_options_integration_response" {
+  depends_on = [aws_api_gateway_integration.bounty_options_integration]
+
+  rest_api_id = aws_api_gateway_rest_api.api.id
+  resource_id = aws_api_gateway_resource.bounty.id
+  http_method = aws_api_gateway_method.bounty_options.http_method
+  status_code = aws_api_gateway_method_response.bounty_options_response.status_code
+
+  response_parameters = {
+    "method.response.header.Access-Control-Allow-Origin"  = "'*'"
+    "method.response.header.Access-Control-Allow-Headers" = "'Content-Type'"
+    "method.response.header.Access-Control-Allow-Methods" = "'GET,POST,OPTIONS'"
+  }
 }
 
-#############################################################
-# /claim (POST)
-#############################################################
+# ---------------------------------------------------------------
+# ENDPOINT /claim (POST + OPTIONS) -> lambda claim_bounty
+# ---------------------------------------------------------------
 resource "aws_api_gateway_resource" "claim" {
   rest_api_id = aws_api_gateway_rest_api.api.id
   parent_id   = aws_api_gateway_rest_api.api.root_resource_id
@@ -413,91 +469,111 @@ resource "aws_api_gateway_method" "claim_post" {
   authorization = "NONE"
 }
 
-resource "aws_api_gateway_integration" "claim_int" {
+resource "aws_api_gateway_integration" "claim_integration" {
   rest_api_id             = aws_api_gateway_rest_api.api.id
   resource_id             = aws_api_gateway_resource.claim.id
-  http_method             = "POST"
+  http_method             = aws_api_gateway_method.claim_post.http_method
   integration_http_method = "POST"
   type                    = "AWS_PROXY"
   uri                     = aws_lambda_function.claim_bounty.invoke_arn
 }
 
 # CORS /claim
-resource "aws_api_gateway_method" "claim_opt" {
+resource "aws_api_gateway_method" "claim_options" {
   rest_api_id   = aws_api_gateway_rest_api.api.id
   resource_id   = aws_api_gateway_resource.claim.id
   http_method   = "OPTIONS"
   authorization = "NONE"
 }
 
-resource "aws_api_gateway_integration" "claim_cors" {
-  rest_api_id       = aws_api_gateway_rest_api.api.id
-  resource_id       = aws_api_gateway_resource.claim.id
-  http_method       = "OPTIONS"
-  type              = "MOCK"
-  request_templates = { "application/json" = "{ \"statusCode\": 200 }" }
+resource "aws_api_gateway_integration" "claim_options_integration" {
+  rest_api_id = aws_api_gateway_rest_api.api.id
+  resource_id = aws_api_gateway_resource.claim.id
+  http_method = aws_api_gateway_method.claim_options.http_method
+  type        = "MOCK"
+
+  request_templates = {
+    "application/json" = "{ \"statusCode\": 200 }"
+  }
 }
 
-resource "aws_api_gateway_method_response" "claim_cors_resp" {
-  rest_api_id        = aws_api_gateway_rest_api.api.id
-  resource_id        = aws_api_gateway_resource.claim.id
-  http_method        = "OPTIONS"
-  status_code        = "200"
-  response_parameters = local.cors_headers
+resource "aws_api_gateway_method_response" "claim_options_response" {
+  rest_api_id = aws_api_gateway_rest_api.api.id
+  resource_id = aws_api_gateway_resource.claim.id
+  http_method = aws_api_gateway_method.claim_options.http_method
+  status_code = "200"
+
+  response_parameters = {
+    "method.response.header.Access-Control-Allow-Origin"  = true
+    "method.response.header.Access-Control-Allow-Headers" = true
+    "method.response.header.Access-Control-Allow-Methods" = true
+  }
 }
 
-resource "aws_api_gateway_integration_response" "claim_cors_int_resp" {
-  rest_api_id        = aws_api_gateway_rest_api.api.id
-  resource_id        = aws_api_gateway_resource.claim.id
-  http_method        = "OPTIONS"
-  status_code        = "200"
-  response_parameters = local.cors_params
+resource "aws_api_gateway_integration_response" "claim_options_integration_response" {
+  depends_on = [aws_api_gateway_integration.claim_options_integration]
+
+  rest_api_id = aws_api_gateway_rest_api.api.id
+  resource_id = aws_api_gateway_resource.claim.id
+  http_method = aws_api_gateway_method.claim_options.http_method
+  status_code = aws_api_gateway_method_response.claim_options_response.status_code
+
+  response_parameters = {
+    "method.response.header.Access-Control-Allow-Origin"  = "'*'"
+    "method.response.header.Access-Control-Allow-Headers" = "'Content-Type'"
+    "method.response.header.Access-Control-Allow-Methods" = "'GET,POST,OPTIONS'"
+  }
 }
 
-#############################################################
-# PERMISSION API GATEWAY → LAMBDA
-#############################################################
-resource "aws_lambda_permission" "hello" {
-  statement_id  = "AllowInvokeHello"
+# ---------------------------------------------------------------
+# PERMISSIONS LAMBDA (API Gateway -> Lambdas)
+# ---------------------------------------------------------------
+resource "aws_lambda_permission" "allow_from_apig_hello" {
+  statement_id  = "AllowInvokeFromAPIGHello"
   action        = "lambda:InvokeFunction"
   function_name = aws_lambda_function.hello.function_name
   principal     = "apigateway.amazonaws.com"
   source_arn    = "${aws_api_gateway_rest_api.api.execution_arn}/*/*"
 }
 
-resource "aws_lambda_permission" "list" {
-  statement_id  = "AllowInvokeList"
+resource "aws_lambda_permission" "allow_from_apig_get_bounties" {
+  statement_id  = "AllowInvokeFromAPIGGetBounties"
   action        = "lambda:InvokeFunction"
-  function_name = aws_lambda_function.list_bounties.function_name
+  function_name = aws_lambda_function.get_bounties.function_name
   principal     = "apigateway.amazonaws.com"
   source_arn    = "${aws_api_gateway_rest_api.api.execution_arn}/*/*"
 }
 
-resource "aws_lambda_permission" "create" {
-  statement_id  = "AllowInvokeCreate"
+resource "aws_lambda_permission" "allow_from_apig_create_bounty" {
+  statement_id  = "AllowInvokeFromAPIGCreateBounty"
   action        = "lambda:InvokeFunction"
   function_name = aws_lambda_function.create_bounty.function_name
   principal     = "apigateway.amazonaws.com"
   source_arn    = "${aws_api_gateway_rest_api.api.execution_arn}/*/*"
 }
 
-resource "aws_lambda_permission" "claim" {
-  statement_id  = "AllowInvokeClaim"
+resource "aws_lambda_permission" "allow_from_apig_claim_bounty" {
+  statement_id  = "AllowInvokeFromAPIGClaimBounty"
   action        = "lambda:InvokeFunction"
   function_name = aws_lambda_function.claim_bounty.function_name
   principal     = "apigateway.amazonaws.com"
   source_arn    = "${aws_api_gateway_rest_api.api.execution_arn}/*/*"
 }
 
-#############################################################
-# DEPLOY + STAGE
-#############################################################
+# ---------------------------------------------------------------
+# DEPLOYMENT + STAGE
+# ---------------------------------------------------------------
 resource "aws_api_gateway_deployment" "deploy" {
   depends_on = [
-    aws_api_gateway_integration.hello_int,
-    aws_api_gateway_integration.bounties_int,
-    aws_api_gateway_integration.bounty_int,
-    aws_api_gateway_integration.claim_int,
+    aws_api_gateway_integration.hello_integration,
+    aws_api_gateway_integration.bounties_integration,
+    aws_api_gateway_integration.bounty_integration,
+    aws_api_gateway_integration.claim_integration,
+    aws_api_gateway_integration.hello_options_integration,
+    aws_api_gateway_integration.bounties_options_integration,
+    aws_api_gateway_integration.bounty_options_integration,
+    aws_api_gateway_integration.claim_options_integration,
+    aws_api_gateway_integration.root_options_integration
   ]
 
   rest_api_id = aws_api_gateway_rest_api.api.id
@@ -516,34 +592,8 @@ resource "aws_s3_bucket" "site_front" {
   bucket = "pirate-site-front-julie"
 }
 
-resource "aws_s3_bucket_acl" "site_acl" {
-  bucket = aws_s3_bucket.site.id
-  acl    = "public-read"
-}
-
-resource "aws_s3_bucket_public_access_block" "site_pub" {
-  bucket                  = aws_s3_bucket.site.id
-  block_public_acls       = false
-  block_public_policy     = false
-  ignore_public_acls      = false
-  restrict_public_buckets = false
-}
-
-resource "aws_s3_bucket_policy" "site_policy" {
-  bucket = aws_s3_bucket.site.id
-  policy = jsonencode({
-    Version = "2012-10-17",
-    Statement = [{
-      Effect = "Allow",
-      Principal = "*",
-      Action   = "s3:GetObject",
-      Resource = "${aws_s3_bucket.site.arn}/*"
-    }]
-  })
-}
-
-resource "aws_s3_bucket_website_configuration" "site_web" {
-  bucket = aws_s3_bucket.site.id
+resource "aws_s3_bucket_website_configuration" "site_front" {
+  bucket = aws_s3_bucket.site_front.id
 
   index_document {
     suffix = "index.html"
@@ -598,7 +648,7 @@ resource "aws_s3_bucket_policy" "site_front_policy" {
 resource "aws_s3_object" "site_files" {
   for_each = fileset("${path.module}/website", "**")
 
-  bucket = aws_s3_bucket.site.bucket
+  bucket = aws_s3_bucket.site_front.bucket
   key    = each.value
   source = "${path.module}/website/${each.value}"
   etag   = filemd5("${path.module}/website/${each.value}")

@@ -10,7 +10,7 @@ services:
     environment:
       - SERVICES=lambda,apigateway,dynamodb,sqs,s3,iam,cloudwatch
       - DEBUG=1
-      - AWS_DEFAULT_REGION=eu-west-1
+      - AWS_DEFAULT_REGION=us-east-1
       - LAMBDA_EXECUTOR=docker-reuse
       - DOCKER_HOST=unix:///var/run/docker.sock
       - LAMBDA_REMOTE_DOCKER=false
