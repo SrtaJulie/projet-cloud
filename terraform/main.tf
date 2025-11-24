@@ -17,20 +17,20 @@ terraform {
 # PROVIDER LOCALSTACK
 # ---------------------------------------------------------------
 provider "aws" {
-  region                      = "eu-west-1"
-  access_key                  = "test"
-  secret_key                  = "test"
+  region                      = var.aws_region
+  access_key                  = var.aws_access_key
+  secret_key                  = var.aws_secret_key
   skip_credentials_validation = true
   skip_metadata_api_check     = true
   s3_use_path_style           = true
 
   endpoints {
-    s3         = "http://localhost:4566"
-    lambda     = "http://localhost:4566"
-    dynamodb   = "http://localhost:4566"
-    apigateway = "http://localhost:4566"
-    iam        = "http://localhost:4566"
-    cloudwatch = "http://localhost:4566"
+    s3         = var.localstack_endpoint
+    lambda     = var.localstack_endpoint
+    dynamodb   = var.localstack_endpoint
+    apigateway = var.localstack_endpoint
+    iam        = var.localstack_endpoint
+    cloudwatch = var.localstack_endpoint
   }
 }
 
@@ -586,15 +586,4 @@ resource "aws_s3_object" "site_files" {
     "gif"  = "image/gif",
     "ico"  = "image/x-icon"
   }, split(".", each.value)[length(split(".", each.value)) - 1], "application/octet-stream")
-}
-
-# ---------------------------------------------------------------
-# OUTPUTS
-# ---------------------------------------------------------------
-output "base_url" {
-  value = "http://localhost:4566/restapis/${aws_api_gateway_rest_api.api.id}/${aws_api_gateway_stage.dev.stage_name}/_user_request_"
-}
-
-output "frontend_website_endpoint" {
-  value = aws_s3_bucket_website_configuration.site_front.website_endpoint
 }

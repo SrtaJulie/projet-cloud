@@ -13,3 +13,6 @@ __pycache__/
 # OS garbage
 .DS_Store
 Thumbs.db
+
+#Terraform secrets
+*.tfvars
