@@ -2,15 +2,21 @@ version: "3.8"
 
 services:
   localstack:
-    image: localstack/localstack:latest
+    image: localstack/localstack:3.2
     container_name: localstack
     ports:
-      - "4566:4566"      # Port unifié LocalStack
+      - "4566:4566"
       - "4571:4571"
     environment:
-      - SERVICES=s3,lambda,apigateway,dynamodb,sqs,cloudwatch,iam
+      - SERVICES=lambda,apigateway,dynamodb,sqs,s3,iam,cloudwatch
       - DEBUG=1
-      - AWS_DEFAULT_REGION=eu-west-1
+      - AWS_DEFAULT_REGION=us-east-1
+      - LAMBDA_EXECUTOR=docker-reuse
+      - DOCKER_HOST=unix:///var/run/docker.sock
+      - LAMBDA_REMOTE_DOCKER=false
+      - LS_LOG=trace
+
     volumes:
       - "./.localstack:/var/lib/localstack"
+      # Permet à LocalStack de lancer des conteneurs Lambda
       - "/var/run/docker.sock:/var/run/docker.sock"
