@@ -21,8 +21,10 @@ provider "aws" {
   access_key                  = var.aws_access_key
   secret_key                  = var.aws_secret_key
   skip_credentials_validation = true
+  skip_requesting_account_id  = true
   skip_metadata_api_check     = true
-  s3_use_path_style           = true
+
+  s3_use_path_style = true
 
   endpoints {
     s3         = var.localstack_endpoint
@@ -35,7 +37,7 @@ provider "aws" {
 }
 
 # ---------------------------------------------------------------
-# DYNAMODB TABLE (simple, stable sous LocalStack)
+# DYNAMODB TABLE
 # ---------------------------------------------------------------
 resource "aws_dynamodb_table" "bounties" {
   name         = "Bounties"
@@ -60,7 +62,7 @@ resource "aws_dynamodb_table" "bounties" {
 }
 
 # ---------------------------------------------------------------
-# LAMBDA ZIP
+# LAMBDA ZIP UNIQUE (toutes les lambdas dans /lambda)
 # ---------------------------------------------------------------
 data "archive_file" "lambda_zip" {
   type        = "zip"
@@ -92,7 +94,6 @@ resource "aws_iam_role_policy" "lambda_policy" {
     Version = "2012-10-17",
     Statement = [
       {
-        # Logs CloudWatch : uniquement ce qui est nécessaire
         Effect = "Allow",
         Action = [
           "logs:CreateLogGroup",
@@ -102,7 +103,6 @@ resource "aws_iam_role_policy" "lambda_policy" {
         Resource = "*"
       },
       {
-        # Accès limité à la table DynamoDB Bounties
         Effect = "Allow",
         Action = [
           "dynamodb:GetItem",
@@ -117,12 +117,58 @@ resource "aws_iam_role_policy" "lambda_policy" {
 }
 
 # ---------------------------------------------------------------
-# LAMBDA FUNCTION
+# LAMBDAS (4 fonctions séparées, même ZIP)
 # ---------------------------------------------------------------
-resource "aws_lambda_function" "api_handler" {
-  function_name = "api-handler"
+# handler = "hello.handler"  -> lambda/hello/handler.py
+# handler = "get_bounties.handler" -> lambda/get_bounties/handler.py
+# etc.
+
+resource "aws_lambda_function" "hello" {
+  function_name = "lambda-hello"
   runtime       = "python3.11"
-  handler       = "handler.handler"
+  handler       = "hello.handler.handler"
+  role          = aws_iam_role.lambda_exec_role.arn
+
+  filename         = data.archive_file.lambda_zip.output_path
+  source_code_hash = data.archive_file.lambda_zip.output_base64sha256
+}
+
+resource "aws_lambda_function" "get_bounties" {
+  function_name = "lambda-get-bounties"
+  runtime       = "python3.11"
+  handler       = "get_bounties.handler.handler"
+  role          = aws_iam_role.lambda_exec_role.arn
+
+  filename         = data.archive_file.lambda_zip.output_path
+  source_code_hash = data.archive_file.lambda_zip.output_base64sha256
+
+  environment {
+    variables = {
+      TABLE_NAME = aws_dynamodb_table.bounties.name
+    }
+  }
+}
+
+resource "aws_lambda_function" "create_bounty" {
+  function_name = "lambda-create-bounty"
+  runtime       = "python3.11"
+  handler       = "create_bounty.handler.handler"
+  role          = aws_iam_role.lambda_exec_role.arn
+
+  filename         = data.archive_file.lambda_zip.output_path
+  source_code_hash = data.archive_file.lambda_zip.output_base64sha256
+
+  environment {
+    variables = {
+      TABLE_NAME = aws_dynamodb_table.bounties.name
+    }
+  }
+}
+
+resource "aws_lambda_function" "claim_bounty" {
+  function_name = "lambda-claim-bounty"
+  runtime       = "python3.11"
+  handler       = "claim_bounty.handler.handler"
   role          = aws_iam_role.lambda_exec_role.arn
 
   filename         = data.archive_file.lambda_zip.output_path
@@ -177,6 +223,8 @@ resource "aws_api_gateway_method_response" "root_options_response" {
 }
 
 resource "aws_api_gateway_integration_response" "root_options_integration_response" {
+  depends_on = [aws_api_gateway_integration.root_options_integration]
+
   rest_api_id = aws_api_gateway_rest_api.api.id
   resource_id = aws_api_gateway_rest_api.api.root_resource_id
   http_method = aws_api_gateway_method.root_options.http_method
@@ -187,14 +235,10 @@ resource "aws_api_gateway_integration_response" "root_options_integration_respon
     "method.response.header.Access-Control-Allow-Headers" = "'Content-Type'"
     "method.response.header.Access-Control-Allow-Methods" = "'GET,POST,OPTIONS'"
   }
-
-  response_templates = {
-    "application/json" = ""
-  }
 }
 
 # ---------------------------------------------------------------
-# ENDPOINT /hello (GET + OPTIONS)
+# ENDPOINT /hello (GET + OPTIONS) -> lambda hello
 # ---------------------------------------------------------------
 resource "aws_api_gateway_resource" "hello" {
   rest_api_id = aws_api_gateway_rest_api.api.id
@@ -215,7 +259,7 @@ resource "aws_api_gateway_integration" "hello_integration" {
   http_method             = aws_api_gateway_method.hello_get.http_method
   integration_http_method = "POST"
   type                    = "AWS_PROXY"
-  uri                     = aws_lambda_function.api_handler.invoke_arn
+  uri                     = aws_lambda_function.hello.invoke_arn
 }
 
 # CORS /hello
@@ -251,6 +295,8 @@ resource "aws_api_gateway_method_response" "hello_options_response" {
 }
 
 resource "aws_api_gateway_integration_response" "hello_options_integration_response" {
+  depends_on = [aws_api_gateway_integration.hello_options_integration]
+
   rest_api_id = aws_api_gateway_rest_api.api.id
   resource_id = aws_api_gateway_resource.hello.id
   http_method = aws_api_gateway_method.hello_options.http_method
@@ -264,7 +310,7 @@ resource "aws_api_gateway_integration_response" "hello_options_integration_respo
 }
 
 # ---------------------------------------------------------------
-# ENDPOINT /bounties (GET + OPTIONS)
+# ENDPOINT /bounties (GET + OPTIONS) -> lambda get_bounties
 # ---------------------------------------------------------------
 resource "aws_api_gateway_resource" "bounties" {
   rest_api_id = aws_api_gateway_rest_api.api.id
@@ -285,7 +331,7 @@ resource "aws_api_gateway_integration" "bounties_integration" {
   http_method             = aws_api_gateway_method.bounties_get.http_method
   integration_http_method = "POST"
   type                    = "AWS_PROXY"
-  uri                     = aws_lambda_function.api_handler.invoke_arn
+  uri                     = aws_lambda_function.get_bounties.invoke_arn
 }
 
 # CORS /bounties
@@ -321,6 +367,8 @@ resource "aws_api_gateway_method_response" "bounties_options_response" {
 }
 
 resource "aws_api_gateway_integration_response" "bounties_options_integration_response" {
+  depends_on = [aws_api_gateway_integration.bounties_options_integration]
+
   rest_api_id = aws_api_gateway_rest_api.api.id
   resource_id = aws_api_gateway_resource.bounties.id
   http_method = aws_api_gateway_method.bounties_options.http_method
@@ -334,7 +382,7 @@ resource "aws_api_gateway_integration_response" "bounties_options_integration_re
 }
 
 # ---------------------------------------------------------------
-# ENDPOINT /bounty (POST + OPTIONS)
+# ENDPOINT /bounty (POST + OPTIONS) -> lambda create_bounty
 # ---------------------------------------------------------------
 resource "aws_api_gateway_resource" "bounty" {
   rest_api_id = aws_api_gateway_rest_api.api.id
@@ -355,7 +403,7 @@ resource "aws_api_gateway_integration" "bounty_integration" {
   http_method             = aws_api_gateway_method.bounty_post.http_method
   integration_http_method = "POST"
   type                    = "AWS_PROXY"
-  uri                     = aws_lambda_function.api_handler.invoke_arn
+  uri                     = aws_lambda_function.create_bounty.invoke_arn
 }
 
 # CORS /bounty
@@ -391,6 +439,8 @@ resource "aws_api_gateway_method_response" "bounty_options_response" {
 }
 
 resource "aws_api_gateway_integration_response" "bounty_options_integration_response" {
+  depends_on = [aws_api_gateway_integration.bounty_options_integration]
+
   rest_api_id = aws_api_gateway_rest_api.api.id
   resource_id = aws_api_gateway_resource.bounty.id
   http_method = aws_api_gateway_method.bounty_options.http_method
@@ -404,7 +454,7 @@ resource "aws_api_gateway_integration_response" "bounty_options_integration_resp
 }
 
 # ---------------------------------------------------------------
-# ENDPOINT /claim (POST + OPTIONS)
+# ENDPOINT /claim (POST + OPTIONS) -> lambda claim_bounty
 # ---------------------------------------------------------------
 resource "aws_api_gateway_resource" "claim" {
   rest_api_id = aws_api_gateway_rest_api.api.id
@@ -425,7 +475,7 @@ resource "aws_api_gateway_integration" "claim_integration" {
   http_method             = aws_api_gateway_method.claim_post.http_method
   integration_http_method = "POST"
   type                    = "AWS_PROXY"
-  uri                     = aws_lambda_function.api_handler.invoke_arn
+  uri                     = aws_lambda_function.claim_bounty.invoke_arn
 }
 
 # CORS /claim
@@ -461,6 +511,8 @@ resource "aws_api_gateway_method_response" "claim_options_response" {
 }
 
 resource "aws_api_gateway_integration_response" "claim_options_integration_response" {
+  depends_on = [aws_api_gateway_integration.claim_options_integration]
+
   rest_api_id = aws_api_gateway_rest_api.api.id
   resource_id = aws_api_gateway_resource.claim.id
   http_method = aws_api_gateway_method.claim_options.http_method
@@ -474,12 +526,36 @@ resource "aws_api_gateway_integration_response" "claim_options_integration_respo
 }
 
 # ---------------------------------------------------------------
-# PERMISSION LAMBDA (API Gateway -> Lambda)
+# PERMISSIONS LAMBDA (API Gateway -> Lambdas)
 # ---------------------------------------------------------------
-resource "aws_lambda_permission" "allow_from_apig" {
-  statement_id  = "AllowInvokeFromAPIG"
+resource "aws_lambda_permission" "allow_from_apig_hello" {
+  statement_id  = "AllowInvokeFromAPIGHello"
   action        = "lambda:InvokeFunction"
-  function_name = aws_lambda_function.api_handler.function_name
+  function_name = aws_lambda_function.hello.function_name
+  principal     = "apigateway.amazonaws.com"
+  source_arn    = "${aws_api_gateway_rest_api.api.execution_arn}/*/*"
+}
+
+resource "aws_lambda_permission" "allow_from_apig_get_bounties" {
+  statement_id  = "AllowInvokeFromAPIGGetBounties"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.get_bounties.function_name
+  principal     = "apigateway.amazonaws.com"
+  source_arn    = "${aws_api_gateway_rest_api.api.execution_arn}/*/*"
+}
+
+resource "aws_lambda_permission" "allow_from_apig_create_bounty" {
+  statement_id  = "AllowInvokeFromAPIGCreateBounty"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.create_bounty.function_name
+  principal     = "apigateway.amazonaws.com"
+  source_arn    = "${aws_api_gateway_rest_api.api.execution_arn}/*/*"
+}
+
+resource "aws_lambda_permission" "allow_from_apig_claim_bounty" {
+  statement_id  = "AllowInvokeFromAPIGClaimBounty"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.claim_bounty.function_name
   principal     = "apigateway.amazonaws.com"
   source_arn    = "${aws_api_gateway_rest_api.api.execution_arn}/*/*"
 }
